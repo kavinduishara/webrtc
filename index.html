@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebRTC Group Call Demo</title>
+    <style>
+      
+    </style>
+  </head>
+  <body>
+    <h3 id="roomid"></h3>
+    <div class="videos">
+      <div>
+        <video id="webcamVideo" autoplay playsinline></video>
+      </div>
+    </div>
+    <button id="toggleAudio">Toggle Audio</button>
+    <button id="toggleVideo">Toggle Video</button>
+
+<br>
+    <input id="usernameInput" placeholder="Enter Your Name" />
+    <input id="callInput" placeholder="Enter Call ID" />
+    <button id="callButton" disabled>Create Call</button>
+    <button id="answerButton" disabled>Join Call</button>
+<br>
+    <button id="hangupButton" disabled>Hangup</button>
+
+
+    <hr>
+    <div style="max-width:600px;margin:10px auto;text-align:left;" id="chatSection">
+      <div id="messages" style="height:200px;overflow-y:auto;border:1px solid #ccc;padding:10px;margin-bottom:10px;"></div>
+      <input id="messageInput" type="text" placeholder="Type a message..." style="width:75%;" />
+      <button id="sendButton">Send</button>
+    </div>
+
+    <script type="module" src="/main.js"></script>
+
+  </body>
+</html>
