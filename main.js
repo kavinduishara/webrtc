@@ -35,6 +35,7 @@ const servers = {
 let localStream = null;
 const peerConnections = {};
 const pendingCandidates = {};
+const peerNames = {};
 
 const videosContainer = document.querySelector('.videos');
 
@@ -44,10 +45,20 @@ const callButton = document.getElementById('callButton');
 const answerButton = document.getElementById('answerButton');
 const callInput = document.getElementById('callInput');
 
+const toggleAudioBtn = document.getElementById('toggleAudio');
+const toggleVideoBtn = document.getElementById('toggleVideo');
+const messageInput = document.getElementById('messageInput');
+const sendButton = document.getElementById('sendButton');
+const messagesContainer = document.getElementById('messages');
+
+let audioEnabled = true;
+let videoEnabled = true;
+
+toggleAudioBtn.textContent = 'Mute Audio';
+toggleVideoBtn.textContent = 'Disable Video';
 
 let userId = crypto.randomUUID();
 let callRef = null;
-
 
 async function init() {
   localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -56,7 +67,6 @@ async function init() {
   callButton.disabled = false;
   answerButton.disabled = false;
 }
-
 init();
 
 function hidePreJoinUI() {
@@ -64,12 +74,12 @@ function hidePreJoinUI() {
   callButton.style.display = 'none';
   answerButton.style.display = 'none';
 }
+
 function showPreJoinUI() {
   usernameInput.style.display = 'inline-block';
   callButton.style.display = 'inline-block';
   answerButton.style.display = 'inline-block';
 }
-
 
 callButton.onclick = async () => {
   if (!username) {
@@ -79,9 +89,10 @@ callButton.onclick = async () => {
 
   const roomId = crypto.randomUUID();
   callInput.value = roomId;
-  
+
   callRef = firestore.collection('calls').doc(roomId);
   await callRef.set({});
+
   await joinRoom(roomId);
 
   hidePreJoinUI();
@@ -102,27 +113,52 @@ answerButton.onclick = async () => {
   hidePreJoinUI();
 };
 
-
 async function joinRoom(roomId) {
   hangupButton.style.display = 'inline-block';
   chatSection.style.display = 'block';
-  
-  
+  callInput.disabled = true;
+
   while (!username) {
     username = prompt("Enter your name:");
   }
+
   const peersRef = callRef.collection('peers');
   const candidatesRef = callRef.collection('candidates');
 
   await peersRef.doc(userId).set({ name: username, joined: firebase.firestore.FieldValue.serverTimestamp() });
 
-  const peerNames = {};
+  const hasJoinedBefore = new Set();
 
   peersRef.onSnapshot(async snapshot => {
     snapshot.docChanges().forEach(async change => {
       const peerId = change.doc.id;
-      const peerName = change.doc.data().name || peerId;
+      const peerData = change.doc.data();
+      const peerName = peerData?.name || peerId;
       peerNames[peerId] = peerName;
+
+      if (change.type === 'removed') {
+        const video = document.querySelector(`video[data-peer="${peerId}"]`);
+        video?.parentElement?.remove();
+
+        const msg = document.createElement('div');
+        msg.textContent = `[System]: ${peerName} has left the call.`;
+        msg.style.fontStyle = 'italic';
+        messagesContainer.appendChild(msg);
+
+        if (peerConnections[peerId]) {
+          peerConnections[peerId].close();
+          delete peerConnections[peerId];
+        }
+        return;
+      }
+
+      if (change.type === 'added' && peerId !== userId && !hasJoinedBefore.has(peerId)) {
+        hasJoinedBefore.add(peerId);
+        const msg = document.createElement('div');
+        msg.textContent = `[System]: ${peerName} has joined the call.`;
+        msg.style.fontStyle = 'italic';
+        messagesContainer.appendChild(msg);
+      }
 
       if (peerId === userId || peerConnections[peerId]) return;
 
@@ -133,12 +169,12 @@ async function joinRoom(roomId) {
       if (userId < peerId) {
         dataChannel = pc.createDataChannel('chat');
         setupDataChannel(dataChannel, peerId, peerName);
-        peerConnections[peerId].dataChannel = dataChannel;
+        pc.dataChannel = dataChannel;
       } else {
         pc.ondatachannel = event => {
           dataChannel = event.channel;
           setupDataChannel(dataChannel, peerId, peerName);
-          peerConnections[peerId].dataChannel = dataChannel;
+          pc.dataChannel = dataChannel;
         };
       }
 
@@ -154,6 +190,26 @@ async function joinRoom(roomId) {
       remoteVideo.setAttribute('data-peer', peerId);
       remoteVideo.style.width = "300px";
       remoteVideo.style.margin = "10px";
+      remoteVideo.style.cursor = "pointer"; // Indicate that the video is clickable
+
+      // Maximize button
+      const maximizeBtn = document.createElement('button');
+      maximizeBtn.textContent = 'Maximize';
+      maximizeBtn.style.marginTop = '5px';
+      maximizeBtn.style.fontSize = '14px';
+
+      maximizeBtn.onclick = () => {
+        if (!document.fullscreenElement) {
+          remoteVideo.requestFullscreen().catch(err => {
+            console.error("Error attempting to enable full-screen mode:", err);
+          });
+        } else {
+          document.exitFullscreen().catch(err => {
+            console.error("Error exiting full-screen mode:", err);
+          });
+        }
+      };
+      
 
       const label = document.createElement('div');
       label.textContent = peerName;
@@ -161,6 +217,7 @@ async function joinRoom(roomId) {
 
       wrapper.appendChild(remoteVideo);
       wrapper.appendChild(label);
+      wrapper.appendChild(maximizeBtn);
       videosContainer.appendChild(wrapper);
 
       const remoteStream = new MediaStream();
@@ -215,7 +272,7 @@ async function joinRoom(roomId) {
             try {
               await pc.addIceCandidate(new RTCIceCandidate(c));
             } catch (e) {
-              console.error("Error adding buffered ICE candidate:", e);
+              console.error("Error adding ICE candidate:", e);
             }
           }
           delete pendingCandidates[from];
@@ -244,25 +301,20 @@ hangupButton.onclick = async () => {
   for (const peerId in peerConnections) {
     peerConnections[peerId].close();
     delete peerConnections[peerId];
+
     const video = document.querySelector(`video[data-peer="${peerId}"]`);
     video?.parentElement?.remove();
   }
+
   if (callRef) {
     await callRef.collection('peers').doc(userId).delete();
   }
-  showPreJoinUI()
+
+  showPreJoinUI();
   hangupButton.style.display = 'none';
   chatSection.style.display = 'none';
+  callInput.disabled = false;
 };
-
-const toggleAudioBtn = document.getElementById('toggleAudio');
-const toggleVideoBtn = document.getElementById('toggleVideo');
-
-let audioEnabled = true;
-let videoEnabled = true;
-
-toggleAudioBtn.textContent = 'Mute Audio';
-toggleVideoBtn.textContent = 'Disable Video';
 
 toggleAudioBtn.onclick = () => {
   audioEnabled = !audioEnabled;
@@ -275,26 +327,6 @@ toggleVideoBtn.onclick = () => {
   localStream.getVideoTracks().forEach(track => (track.enabled = videoEnabled));
   toggleVideoBtn.textContent = videoEnabled ? 'Disable Video' : 'Enable Video';
 };
-
-const messageInput = document.getElementById('messageInput');
-const sendButton = document.getElementById('sendButton');
-const messagesContainer = document.getElementById('messages');
-
-function setupDataChannel(channel, peerId, peerName) {
-  channel.onopen = () => {
-    console.log(`Data channel opened with ${peerId}`);
-  };
-
-  channel.onmessage = (event) => {
-    const msg = document.createElement('div');
-    msg.textContent = `[${peerName}]: ${event.data}`;
-    messagesContainer.appendChild(msg);
-  };
-
-  channel.onerror = (error) => {
-    console.error("DataChannel error:", error);
-  };
-}
 
 sendButton.onclick = () => {
   const message = messageInput.value.trim();
@@ -312,6 +344,16 @@ sendButton.onclick = () => {
   messagesContainer.appendChild(msg);
   messageInput.value = '';
 };
+
+function setupDataChannel(channel, peerId, peerName) {
+  channel.onopen = () => console.log(`Data channel opened with ${peerId}`);
+  channel.onmessage = (event) => {
+    const msg = document.createElement('div');
+    msg.textContent = `[${peerName}]: ${event.data}`;
+    messagesContainer.appendChild(msg);
+  };
+  channel.onerror = (error) => console.error("DataChannel error:", error);
+}
 
 usernameInput.addEventListener('input', (event) => {
   username = event.target.value.trim();
